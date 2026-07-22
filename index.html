@@ -72,7 +72,7 @@
   </div>
   <button id="resetShape" type="button" style="width:100%;margin-top:9px">Reset</button>
   <div id="status" class="status" aria-live="polite"></div>
-  <div class="note">The curve is not drawn through a row of editable corner points. That is intentional: it keeps the result smooth like a relaxed rubber loop rather than bent wire.</div>
+  <div class="note"><strong>Inner-loop overlap position</strong> rotates the point where each inner loop folds back into the larger loop. Set the upper overlap to about <strong>7:00</strong> to match the mockup; symmetry automatically places the lower overlap at about <strong>1:00</strong>.<br><br>The curve is not drawn through a row of editable corner points. That is intentional: it keeps the result smooth like a relaxed rubber loop rather than bent wire.</div>
 </aside>
 
 <main>
@@ -111,20 +111,21 @@
   const status = document.getElementById('status');
 
   const defaults = {
-    outerWidth:100,
-    outerHeight:100,
-    innerWidth:100,
-    innerHeight:100,
-    innerX:0,
-    innerY:0,
-    spiralOffset:28,
-    twist:58,
-    waistLength:42,
-    roundness:92,
+    outerWidth:135,
+    outerHeight:110,
+    innerWidth:118,
+    innerHeight:101,
+    innerX:-45,
+    innerY:-6,
+    innerClockOffset:0,
+    spiralOffset:-70,
+    twist:64,
+    waistLength:0,
+    roundness:69,
     strokeWidth:28,
-    overallScale:92,
-    rotation:0,
-    tubeDepth:72
+    overallScale:86,
+    rotation:-17,
+    tubeDepth:80
   };
   const params = {...defaults};
 
@@ -135,6 +136,7 @@
     ['innerHeight','Inner-loop height',55,150,1,'%'],
     ['innerX','Inner loops left / right',-80,80,1,''],
     ['innerY','Inner loops up / down',-80,80,1,''],
+    ['innerClockOffset','Inner-loop overlap position',-6,6,.25,''],
     ['spiralOffset','Spiral offset',-70,70,1,''],
     ['twist','Center twist',15,100,1,'%'],
     ['waistLength','Waist length',0,120,1,''],
@@ -189,7 +191,14 @@
     // relaxed diagonal twist while leaving the two lobes broadly circular.
     const ease=-.44-(params.twist/100)*.38;
     const turn=t+ease*Math.sin(2*Math.PI*t)/(2*Math.PI);
-    const theta=Math.PI/2+4*Math.PI*turn;
+    // Rotate the tight inner turn without rotating the outer loop or the
+    // center crossing. The slider is displayed as a clock-face position.
+    // With the tuned reference shape, -2 hours moves the upper overlap from
+    // roughly 9:00 to roughly 7:00; the lower overlap remains its 180-degree
+    // counterpart at roughly 1:00.
+    const innerPhase=params.innerClockOffset*Math.PI/6*2.5;
+    const phaseWeight=Math.pow(1-u,1.45);
+    const theta=Math.PI/2+4*Math.PI*turn+innerPhase*phaseWeight;
 
     const innerWeight=Math.pow(1-u,2);
     const x=rx*Math.cos(theta)+params.innerX*innerWeight;
@@ -251,7 +260,20 @@
   function setPath(id,d,stroke,width,show=true){ const el=document.getElementById(id); el.setAttribute('d',d); el.setAttribute('stroke',stroke); el.setAttribute('stroke-width',width); el.style.display=show?'':'none'; }
 
   function draw(){
-    for(const [key,,,,,suffix] of controls) document.getElementById(`out-${key}`).textContent=`${params[key]}${suffix}`;
+    for(const [key,,,,,suffix] of controls) {
+      const output=document.getElementById(`out-${key}`);
+      if(key==='innerClockOffset') {
+        let clock=9+params.innerClockOffset;
+        while(clock<=0) clock+=12;
+        while(clock>12) clock-=12;
+        let hour=Math.floor(clock);
+        let minutes=Math.round((clock-hour)*60);
+        if(minutes===60) { hour=hour===12?1:hour+1; minutes=0; }
+        output.textContent=`${hour}:${String(minutes).padStart(2,'0')}`;
+      } else {
+        output.textContent=`${params[key]}${suffix}`;
+      }
+    }
 
     const path=fullPath();
     const over=centerOverPath();
@@ -289,8 +311,8 @@
   function applyPreset(name){
     const presets={
       rubber:{...defaults},
-      round:{...defaults,outerWidth:108,outerHeight:102,innerWidth:92,innerHeight:94,spiralOffset:8,twist:42,waistLength:30,roundness:112},
-      narrow:{...defaults,outerWidth:82,outerHeight:106,innerWidth:84,innerHeight:96,spiralOffset:34,twist:72,waistLength:62,overallScale:96}
+      round:{...defaults,outerWidth:108,outerHeight:102,innerWidth:92,innerHeight:94,innerClockOffset:0,spiralOffset:8,twist:42,waistLength:30,roundness:112,rotation:0,overallScale:92},
+      narrow:{...defaults,outerWidth:82,outerHeight:106,innerWidth:84,innerHeight:96,innerClockOffset:0,spiralOffset:34,twist:72,waistLength:62,overallScale:96,rotation:0}
     };
     Object.assign(params,presets[name]);
     for(const [key] of controls) document.getElementById(key).value=params[key];

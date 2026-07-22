@@ -23,6 +23,7 @@
   .control label { font-size:13px; }
   .control output { min-width:54px; text-align:right; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
   input[type="range"] { grid-column:1/-1; width:100%; accent-color:var(--accent); }
+  .range-ends { grid-column:1/-1; display:flex; justify-content:space-between; margin-top:-3px; color:var(--muted); font-size:11px; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
   .row.three { grid-template-columns:repeat(3,1fr); }
   button, select, input[type="color"] { min-height:40px; border:1px solid #cbd2dc; border-radius:10px; background:#fff; color:var(--ink); font:inherit; }
@@ -72,7 +73,7 @@
   </div>
   <button id="resetShape" type="button" style="width:100%;margin-top:9px">Reset</button>
   <div id="status" class="status" aria-live="polite"></div>
-  <div class="note"><strong>Inner-loop overlap position</strong> rotates the point where each inner loop folds back into the larger loop. Set the upper overlap to about <strong>7:00</strong> to match the mockup; symmetry automatically places the lower overlap at about <strong>1:00</strong>.<br><br>The curve is not drawn through a row of editable corner points. That is intentional: it keeps the result smooth like a relaxed rubber loop rather than bent wire.</div>
+  <div class="note"><strong>Inner-loop tight / loose</strong> changes both dimensions together, so the loop expands and contracts without becoming wider or taller.<br><br><strong>Inner-loop overlap point</strong> moves the upper overlap along the bottom of the loop from <strong>7:00</strong> at the lower-left to <strong>5:00</strong> at the lower-right. The lower loop follows automatically with 180° symmetry.</div>
 </aside>
 
 <main>
@@ -113,11 +114,8 @@
   const defaults = {
     outerWidth:135,
     outerHeight:110,
-    innerWidth:118,
-    innerHeight:101,
-    innerX:-45,
-    innerY:-6,
-    innerClockOffset:0,
+    innerLoopSize:100,
+    innerClockPosition:0,
     spiralOffset:-70,
     twist:64,
     waistLength:0,
@@ -132,11 +130,8 @@
   const controls = [
     ['outerWidth','Outer-loop width',70,135,1,'%'],
     ['outerHeight','Outer-loop height',76,130,1,'%'],
-    ['innerWidth','Inner-loop width',55,150,1,'%'],
-    ['innerHeight','Inner-loop height',55,150,1,'%'],
-    ['innerX','Inner loops left / right',-80,80,1,''],
-    ['innerY','Inner loops up / down',-80,80,1,''],
-    ['innerClockOffset','Inner-loop overlap position',-6,6,.25,''],
+    ['innerLoopSize','Inner-loop tight / loose',55,155,1,'%'],
+    ['innerClockPosition','Inner-loop overlap point',0,1,.025,''],
     ['spiralOffset','Spiral offset',-70,70,1,''],
     ['twist','Center twist',15,100,1,'%'],
     ['waistLength','Waist length',0,120,1,''],
@@ -152,6 +147,8 @@
     const wrap = document.createElement('div');
     wrap.className='control';
     wrap.innerHTML=`<label for="${key}">${label}</label><output id="out-${key}"></output><input id="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${params[key]}">`;
+    if(key==='innerLoopSize') wrap.insertAdjacentHTML('beforeend','<div class="range-ends"><span>Tighter</span><span>Looser</span></div>');
+    if(key==='innerClockPosition') wrap.insertAdjacentHTML('beforeend','<div class="range-ends"><span>7:00 · lower-left</span><span>5:00 · lower-right</span></div>');
     shapeControls.appendChild(wrap);
     wrap.querySelector('input').addEventListener('input', e=>{ params[key]=Number(e.target.value); draw(); });
     wrap.querySelector('input').dataset.suffix=suffix;
@@ -167,8 +164,10 @@
   function upperPoint(t) {
     const outerRx=278*(params.outerWidth/100);
     const outerRy=292*(params.outerHeight/100);
-    const innerRx=68*(params.innerWidth/100);
-    const innerRy=78*(params.innerHeight/100);
+    // One control scales the inner loop uniformly. These fixed base dimensions
+    // preserve the nearly circular proportions of the tuned reference shape.
+    const innerRx=80.24*(params.innerLoopSize/100);
+    const innerRy=78.78*(params.innerLoopSize/100);
 
     const u=(1+Math.cos(2*Math.PI*t))/2;
     const exponent=clamp(1.42-(params.roundness/100)*.56,.55,1.15);
@@ -191,18 +190,23 @@
     // relaxed diagonal twist while leaving the two lobes broadly circular.
     const ease=-.44-(params.twist/100)*.38;
     const turn=t+ease*Math.sin(2*Math.PI*t)/(2*Math.PI);
-    // Rotate the tight inner turn without rotating the outer loop or the
-    // center crossing. The slider is displayed as a clock-face position.
-    // With the tuned reference shape, -2 hours moves the upper overlap from
-    // roughly 9:00 to roughly 7:00; the lower overlap remains its 180-degree
-    // counterpart at roughly 1:00.
-    const innerPhase=params.innerClockOffset*Math.PI/6*2.5;
+    // Rotate only the tight inner turn; the outer loop and center crossing stay fixed.
+    // The overlap slider runs only across the requested bottom arc:
+    // 7:00 at the lower-left, through 6:00, to 5:00 at the lower-right.
+    // These phase endpoints were calibrated against the actual self-intersection
+    // of this curve, rather than treating the clock label as a decorative guess.
+    const calibratedOffset=mix(-2.75,-5.40,params.innerClockPosition);
+    const innerPhase=calibratedOffset*Math.PI/6*2.5;
     const phaseWeight=Math.pow(1-u,1.45);
     const theta=Math.PI/2+4*Math.PI*turn+innerPhase*phaseWeight;
 
     const innerWeight=Math.pow(1-u,2);
-    const x=rx*Math.cos(theta)+params.innerX*innerWeight;
-    const y=-outerRy+ry*Math.sin(theta)+params.innerY*innerWeight-params.waistLength*Math.sin(Math.PI*t)**2;
+    // The tuned loop center is now baked into the design instead of exposed as
+    // separate left/right and up/down controls.
+    const fixedInnerX=-45;
+    const fixedInnerY=-6;
+    const x=rx*Math.cos(theta)+fixedInnerX*innerWeight;
+    const y=-outerRy+ry*Math.sin(theta)+fixedInnerY*innerWeight-params.waistLength*Math.sin(Math.PI*t)**2;
     return [x,y];
   }
 
@@ -262,13 +266,11 @@
   function draw(){
     for(const [key,,,,,suffix] of controls) {
       const output=document.getElementById(`out-${key}`);
-      if(key==='innerClockOffset') {
-        let clock=9+params.innerClockOffset;
-        while(clock<=0) clock+=12;
-        while(clock>12) clock-=12;
+      if(key==='innerClockPosition') {
+        const clock=7-2*params.innerClockPosition;
         let hour=Math.floor(clock);
         let minutes=Math.round((clock-hour)*60);
-        if(minutes===60) { hour=hour===12?1:hour+1; minutes=0; }
+        if(minutes===60) { hour-=1; minutes=0; }
         output.textContent=`${hour}:${String(minutes).padStart(2,'0')}`;
       } else {
         output.textContent=`${params[key]}${suffix}`;
@@ -311,8 +313,8 @@
   function applyPreset(name){
     const presets={
       rubber:{...defaults},
-      round:{...defaults,outerWidth:108,outerHeight:102,innerWidth:92,innerHeight:94,innerClockOffset:0,spiralOffset:8,twist:42,waistLength:30,roundness:112,rotation:0,overallScale:92},
-      narrow:{...defaults,outerWidth:82,outerHeight:106,innerWidth:84,innerHeight:96,innerClockOffset:0,spiralOffset:34,twist:72,waistLength:62,overallScale:96,rotation:0}
+      round:{...defaults,outerWidth:108,outerHeight:102,innerLoopSize:94,innerClockPosition:.5,spiralOffset:8,twist:42,waistLength:30,roundness:112,rotation:0,overallScale:92},
+      narrow:{...defaults,outerWidth:82,outerHeight:106,innerLoopSize:90,innerClockPosition:.5,spiralOffset:34,twist:72,waistLength:62,overallScale:96,rotation:0}
     };
     Object.assign(params,presets[name]);
     for(const [key] of controls) document.getElementById(key).value=params[key];

@@ -73,7 +73,7 @@
   </div>
   <button id="resetShape" type="button" style="width:100%;margin-top:9px">Reset</button>
   <div id="status" class="status" aria-live="polite"></div>
-  <div class="note"><strong>Inner-loop tight / loose</strong> changes both dimensions together, so the loop expands and contracts without becoming wider or taller.<br><br><strong>Inner-loop overlap point</strong> moves clockwise around the long arc: from <strong>7:00 PM</strong> at the lower-left, past <strong>9:00 PM</strong>, <strong>12:00 AM</strong> at the top, and <strong>3:00 AM</strong>, to <strong>5:00 AM</strong> at the lower-right. It no longer travels directly across the bottom through 6:00. The lower loop follows automatically with 180° symmetry.</div>
+  <div class="note"><strong>Inner-loop tight / loose</strong> changes both dimensions together, so the loop expands and contracts without becoming wider or taller.<br><br><strong>Inner-loop overlap point</strong> now repositions the <strong>entire inner spiral</strong>, not just the connector. As it moves clockwise from <strong>7:00 PM</strong> to <strong>5:00 AM</strong>, the inner loop’s center and its exit tangent both move too, so the strand can leave on a smoother diagonal like the reference. The lower loop still follows automatically with 180° symmetry.</div>
 </aside>
 
 <main>
@@ -164,27 +164,51 @@
   // The clock hours are unwrapped from 7 PM through 5 AM (7 through 17)
   // so the control travels clockwise around the left side, top, and right side.
   const clockPhaseStops = [
-    [0.0, -3.64],  // 7 PM
-    [0.1, -2.77],  // 8 PM
-    [0.2, -1.86],  // 9 PM
-    [0.3, -1.01],  // 10 PM
-    [0.4, -0.29],  // 11 PM
-    [0.5,  0.35],  // 12 AM
-    [0.6,  1.00],  // 1 AM
-    [0.7,  1.78],  // 2 AM
-    [0.8,  2.65],  // 3 AM
-    [0.9,  3.52],  // 4 AM
-    [1.0,  4.27]   // 5 AM
+    [0.0, -3.60],  // 7 PM
+    [0.1, -2.86],  // 8 PM
+    [0.2, -2.08],  // 9 PM
+    [0.3, -1.32],  // 10 PM
+    [0.4, -0.55],  // 11 PM
+    [0.5,  0.20],  // 12 AM
+    [0.6,  0.95],  // 1 AM
+    [0.7,  1.72],  // 2 AM
+    [0.8,  2.56],  // 3 AM
+    [0.9,  3.42],  // 4 AM
+    [1.0,  4.10]   // 5 AM
   ];
 
-  function clockPhaseFromSlider(value) {
+  // These stops move the entire center of the inner turn, instead of merely
+  // swiveling the connector around a nearly fixed inner loop. That is the key
+  // change needed to match the reference mockup more closely.
+  const innerCenterStops = [
+    [0.0, -74,  58], // 7 PM: low and left
+    [0.2, -88,  18], // 9 PM: farthest left
+    [0.5,   2, -24], // 12 AM: highest
+    [0.8,  82,  12], // 3 AM: farthest right
+    [1.0,  64,  52]  // 5 AM: low and right
+  ];
+
+  function smoothstep(t){ return t*t*(3-2*t); }
+
+  function sampleStops(stops, value) {
     const v=clamp(value,0,1);
-    for(let i=0;i<clockPhaseStops.length-1;i++) {
-      const [a,pa]=clockPhaseStops[i];
-      const [b,pb]=clockPhaseStops[i+1];
-      if(v<=b) return mix(pa,pb,(v-a)/(b-a));
+    for(let i=0;i<stops.length-1;i++) {
+      const a=stops[i], b=stops[i+1];
+      if(v<=b[0]) {
+        const local=smoothstep((v-a[0])/(b[0]-a[0]));
+        return a.slice(1).map((n,idx)=>mix(n,b[idx+1],local));
+      }
     }
-    return clockPhaseStops[clockPhaseStops.length-1][1];
+    return stops[stops.length-1].slice(1);
+  }
+
+  function clockPhaseFromSlider(value) {
+    return sampleStops(clockPhaseStops.map(([a,p])=>[a,p]), value)[0];
+  }
+
+  function innerCenterFromSlider(value) {
+    const [x,y]=sampleStops(innerCenterStops, value);
+    return {x, y};
   }
 
   function clockLabelFromSlider(value) {
@@ -239,13 +263,23 @@
     const phaseWeight=Math.pow(1-u,1.45);
     const theta=Math.PI/2+4*Math.PI*turn+innerPhase*phaseWeight;
 
-    const innerWeight=Math.pow(1-u,2);
-    // The tuned loop center is now baked into the design instead of exposed as
-    // separate left/right and up/down controls.
-    const fixedInnerX=-45;
-    const fixedInnerY=-6;
-    const x=rx*Math.cos(theta)+fixedInnerX*innerWeight;
-    const y=-outerRy+ry*Math.sin(theta)+fixedInnerY*innerWeight-params.waistLength*Math.sin(Math.PI*t)**2;
+    const innerWeight=Math.pow(1-u,2.1);
+
+    // Move the whole inner spiral center around the inside of the lobe as the
+    // overlap point changes. This prevents the extra neck / hook that appeared
+    // when only the connector was being rotated.
+    const innerCenter=innerCenterFromSlider(params.innerClockPosition);
+    const centerStrength=Math.pow(innerWeight,0.95);
+    const fixedInnerX=innerCenter.x*centerStrength;
+    const fixedInnerY=innerCenter.y*centerStrength;
+
+    // Add a small directional drift so the strand leaves the inner loop on a
+    // clean diagonal, rather than making a localized kink near the overlap.
+    const sweepBias=(params.innerClockPosition-.5)*0.32;
+    const tangentAssist=32*centerStrength*Math.sin(Math.PI*t)*Math.cos(theta+sweepBias);
+
+    const x=rx*Math.cos(theta)+fixedInnerX;
+    const y=-outerRy+ry*Math.sin(theta)+fixedInnerY+tangentAssist-params.waistLength*Math.sin(Math.PI*t)**2;
     return [x,y];
   }
 

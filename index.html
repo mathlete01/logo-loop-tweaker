@@ -73,7 +73,7 @@
   </div>
   <button id="resetShape" type="button" style="width:100%;margin-top:9px">Reset</button>
   <div id="status" class="status" aria-live="polite"></div>
-  <div class="note"><strong>Inner-loop tight / loose</strong> changes both dimensions together, so the loop expands and contracts without becoming wider or taller.<br><br><strong>Inner-loop overlap point</strong> moves the upper overlap along the bottom of the loop from <strong>7:00</strong> at the lower-left to <strong>5:00</strong> at the lower-right. The lower loop follows automatically with 180° symmetry.</div>
+  <div class="note"><strong>Inner-loop tight / loose</strong> changes both dimensions together, so the loop expands and contracts without becoming wider or taller.<br><br><strong>Inner-loop overlap point</strong> moves clockwise around the long arc: from <strong>7:00 PM</strong> at the lower-left, past <strong>9:00 PM</strong>, <strong>12:00 AM</strong> at the top, and <strong>3:00 AM</strong>, to <strong>5:00 AM</strong> at the lower-right. It no longer travels directly across the bottom through 6:00. The lower loop follows automatically with 180° symmetry.</div>
 </aside>
 
 <main>
@@ -148,7 +148,7 @@
     wrap.className='control';
     wrap.innerHTML=`<label for="${key}">${label}</label><output id="out-${key}"></output><input id="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${params[key]}">`;
     if(key==='innerLoopSize') wrap.insertAdjacentHTML('beforeend','<div class="range-ends"><span>Tighter</span><span>Looser</span></div>');
-    if(key==='innerClockPosition') wrap.insertAdjacentHTML('beforeend','<div class="range-ends"><span>7:00 · lower-left</span><span>5:00 · lower-right</span></div>');
+    if(key==='innerClockPosition') wrap.insertAdjacentHTML('beforeend','<div class="range-ends"><span>7:00 PM · lower-left</span><span>12:00 AM · top</span><span>5:00 AM · lower-right</span></div>');
     shapeControls.appendChild(wrap);
     wrap.querySelector('input').addEventListener('input', e=>{ params[key]=Number(e.target.value); draw(); });
     wrap.querySelector('input').dataset.suffix=suffix;
@@ -158,6 +158,45 @@
   const mix=(a,b,t)=>a+(b-a)*t;
   function rgb(hex){ const n=parseInt(hex.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; }
   function shade(hex,amount){ const [r,g,b]=rgb(hex); const toward=amount>=0?255:0; const t=Math.abs(amount); return `rgb(${[r,g,b].map(v=>Math.round(mix(v,toward,t))).join(',')})`; }
+
+
+  // Phase values calibrated to the actual inner-loop self-intersection.
+  // The clock hours are unwrapped from 7 PM through 5 AM (7 through 17)
+  // so the control travels clockwise around the left side, top, and right side.
+  const clockPhaseStops = [
+    [0.0, -3.64],  // 7 PM
+    [0.1, -2.77],  // 8 PM
+    [0.2, -1.86],  // 9 PM
+    [0.3, -1.01],  // 10 PM
+    [0.4, -0.29],  // 11 PM
+    [0.5,  0.35],  // 12 AM
+    [0.6,  1.00],  // 1 AM
+    [0.7,  1.78],  // 2 AM
+    [0.8,  2.65],  // 3 AM
+    [0.9,  3.52],  // 4 AM
+    [1.0,  4.27]   // 5 AM
+  ];
+
+  function clockPhaseFromSlider(value) {
+    const v=clamp(value,0,1);
+    for(let i=0;i<clockPhaseStops.length-1;i++) {
+      const [a,pa]=clockPhaseStops[i];
+      const [b,pb]=clockPhaseStops[i+1];
+      if(v<=b) return mix(pa,pb,(v-a)/(b-a));
+    }
+    return clockPhaseStops[clockPhaseStops.length-1][1];
+  }
+
+  function clockLabelFromSlider(value) {
+    // 0..1 represents exactly ten clockwise hours, from 7 PM to 5 AM.
+    const totalMinutes=Math.round((19*60+10*60*clamp(value,0,1))/15)*15;
+    const wrapped=((totalMinutes%(24*60))+(24*60))%(24*60);
+    const hour24=Math.floor(wrapped/60);
+    const minutes=wrapped%60;
+    const hour12=hour24%12||12;
+    const period=hour24>=12?'PM':'AM';
+    return `${hour12}:${String(minutes).padStart(2,'0')} ${period}`;
+  }
 
   // A smooth two-turn spiral. The upper lobe is this curve; the lower lobe is
   // its exact 180-degree rotational counterpart. No control polygon is used.
@@ -191,12 +230,12 @@
     const ease=-.44-(params.twist/100)*.38;
     const turn=t+ease*Math.sin(2*Math.PI*t)/(2*Math.PI);
     // Rotate only the tight inner turn; the outer loop and center crossing stay fixed.
-    // The overlap slider runs only across the requested bottom arc:
-    // 7:00 at the lower-left, through 6:00, to 5:00 at the lower-right.
-    // These phase endpoints were calibrated against the actual self-intersection
-    // of this curve, rather than treating the clock label as a decorative guess.
-    const calibratedOffset=mix(-2.75,-5.40,params.innerClockPosition);
-    const innerPhase=calibratedOffset*Math.PI/6*2.5;
+    // The slider follows the LONG clockwise clock-face route:
+    // 7:00 PM -> 9:00 PM -> 12:00 AM -> 3:00 AM -> 5:00 AM.
+    // A calibrated lookup keeps the visible self-intersection close to the
+    // clock time shown while avoiding the forced bottom-arc reversal that
+    // produced the hook-shaped bend in the previous version.
+    const innerPhase=clockPhaseFromSlider(params.innerClockPosition);
     const phaseWeight=Math.pow(1-u,1.45);
     const theta=Math.PI/2+4*Math.PI*turn+innerPhase*phaseWeight;
 
@@ -267,11 +306,7 @@
     for(const [key,,,,,suffix] of controls) {
       const output=document.getElementById(`out-${key}`);
       if(key==='innerClockPosition') {
-        const clock=7-2*params.innerClockPosition;
-        let hour=Math.floor(clock);
-        let minutes=Math.round((clock-hour)*60);
-        if(minutes===60) { hour-=1; minutes=0; }
-        output.textContent=`${hour}:${String(minutes).padStart(2,'0')}`;
+        output.textContent=clockLabelFromSlider(params.innerClockPosition);
       } else {
         output.textContent=`${params[key]}${suffix}`;
       }
